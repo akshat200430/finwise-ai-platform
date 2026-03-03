@@ -1,147 +1,173 @@
-# import streamlit as st
-# import os
-# from dotenv import load_dotenv
-# from google import genai
-
-# load_dotenv()
-
-# client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
-
-# st.title("AI Financial Advisor 💰")
-
-# question = st.text_input("Ask your financial question:")
-
-# if question:
-#     try:
-#         response = client.models.generate_content(
-#             model="gemini-flash-lite-latest",
-#             contents=question
-#         )
-#         st.write(response.text)
-#     except Exception as e:
-#         st.error(f"Error: {e}")
-
-
-
 import streamlit as st
-import os
-from dotenv import load_dotenv
-from google import genai
-import matplotlib.pyplot as plt
+from finance_analysis import calculate_financial_metrics
+from visualization import savings_pie_chart, financial_bar_chart
+from ai_advisor import generate_ai_response, build_financial_chat_prompt
+from utils import format_currency
 
-# ----------------------
-# Page Configuration
-# ----------------------
-st.set_page_config(
-    page_title="AI Financial Advisor",
-    page_icon="💰",
-    layout="wide"
-)
+st.set_page_config(layout="wide")
 
-# ----------------------
-# Custom CSS Styling
-# ----------------------
-st.markdown("""
-<style>
-.main-title {
-    font-size: 40px;
-    font-weight: bold;
-    color: #00C897;
-}
-.sub-text {
-    font-size: 18px;
-    color: gray;
-}
-.card {
-    padding: 20px;
-    border-radius: 10px;
-    background-color: #1E1E1E;
-}
-</style>
-""", unsafe_allow_html=True)
+# ---------------------------------
+# AI Usage Control System
+# ---------------------------------
 
-# ----------------------
-# Load API
-# ----------------------
-load_dotenv()
-client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
+if "api_calls" not in st.session_state:
+    st.session_state.api_calls = 0
 
-# ----------------------
-# Sidebar - User Profile
-# ----------------------
-st.sidebar.title("👤 User Profile")
+if "ai_cache" not in st.session_state:
+    st.session_state.ai_cache = {}
 
-age = st.sidebar.slider("Age", 18, 60, 21)
-monthly_income = st.sidebar.number_input("Monthly Income (₹)", min_value=1000, step=1000)
-risk_level = st.sidebar.selectbox("Risk Appetite", ["Low", "Medium", "High"])
-investment_goal = st.sidebar.text_input("Investment Goal (e.g., Car, House, Retirement)")
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
 
-# ----------------------
-# Main Title
-# ----------------------
-st.markdown('<p class="main-title">AI Financial Advisor 💰</p>', unsafe_allow_html=True)
-st.markdown('<p class="sub-text">Smart. Data-driven. Personalized Investment Planning.</p>', unsafe_allow_html=True)
+def safe_ai_call(prompt):
+    # Return cached response if exists
+    if prompt in st.session_state.ai_cache:
+        return st.session_state.ai_cache[prompt]
 
-st.divider()
+    # Limit API calls per session
+    if st.session_state.api_calls >= 10:
+        return "⚠ AI session limit reached. Please try again later."
 
-# ----------------------
-# User Question Section
-# ----------------------
-question = st.text_area("💬 Ask Your Financial Question")
+    response = generate_ai_response(prompt)
 
-if st.button("Generate Advice 🚀"):
+    # Cache response
+    st.session_state.ai_cache[prompt] = response
+    st.session_state.api_calls += 1
 
-    if question == "":
-        st.warning("Please enter your financial question.")
-    else:
-        with st.spinner("Analyzing your financial data..."):
+    return response
 
+# Load CSS
+with open("styles.css") as f:
+    st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
+
+# SIDEBAR
+st.sidebar.title("Profile Configuration")
+
+profile = st.sidebar.selectbox("Profile Type", ["Student", "Professional", "Business"])
+income = st.sidebar.number_input("Monthly Salary (₹)", 0)
+expenses = st.sidebar.number_input("Monthly Expenses (₹)", 0)
+savings = st.sidebar.number_input("Existing Savings (₹)", 0)
+debt = st.sidebar.number_input("Total Debts (₹)", 0)
+goal = st.sidebar.text_input("Financial Goal")
+risk = st.sidebar.selectbox("Risk Tolerance", ["Low", "Medium", "High"])
+
+# Show AI usage
+st.sidebar.markdown("### 🔋 AI Usage")
+remaining = 10 - st.session_state.api_calls
+st.sidebar.progress(st.session_state.api_calls / 10)
+st.sidebar.write(f"Remaining Calls: {remaining}")
+
+section = st.sidebar.radio("Navigate", 
+                           ["Financial Overview", 
+                            "Goal Planning", 
+                            "AI Chat Assistant"])
+
+metrics = calculate_financial_metrics(income, expenses, savings, debt)
+
+# ---------------------------------
+# SECTION 1 — FINANCIAL OVERVIEW
+# ---------------------------------
+if section == "Financial Overview":
+
+    st.markdown('<div class="section-header">Your Financial Summary</div>', unsafe_allow_html=True)
+
+    col1, col2, col3, col4 = st.columns(4)
+
+    col1.metric("Monthly Savings", format_currency(metrics["monthly_savings"]))
+    col2.metric("Savings Ratio", f"{metrics['savings_ratio']*100:.1f}%")
+    col3.metric("Debt Ratio", f"{metrics['debt_ratio']*100:.1f}%")
+    col4.metric("Investment Capacity", format_currency(metrics["investment_capacity"]))
+
+    st.markdown('<div class="section-header">Financial Overview Visualizations</div>', unsafe_allow_html=True)
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.pyplot(savings_pie_chart(income, expenses, metrics["monthly_savings"]))
+
+    with col2:
+        st.pyplot(financial_bar_chart(metrics))
+
+    st.markdown('<div class="section-header">AI Financial Recommendations</div>', unsafe_allow_html=True)
+
+    if st.button("Generate AI Advice"):
+        prompt = f"""
+        Income: {income}
+        Expenses: {expenses}
+        Savings: {savings}
+        Debt: {debt}
+        Risk: {risk}
+        Goal: {goal}
+        Provide structured financial advice.
+        """
+
+        advice = safe_ai_call(prompt)
+        st.success("AI Advice Generated")
+        st.write(advice)
+
+# ---------------------------------
+# SECTION 2 — GOAL PLANNING
+# ---------------------------------
+elif section == "Goal Planning":
+
+    st.markdown('<div class="section-header">Advanced Goal-Oriented Planning</div>', unsafe_allow_html=True)
+
+    target_amount = st.number_input("Target Amount (₹)", 0)
+    years = st.number_input("Years to Achieve Goal", 1)
+
+    if target_amount > 0:
+        monthly_needed = target_amount / (years * 12)
+
+        st.metric("Monthly Investment Needed", format_currency(monthly_needed))
+
+        if st.button("Generate Goal Plan"):
             prompt = f"""
-            You are a professional financial advisor.
-
-            User Profile:
-            Age: {age}
-            Monthly Income: ₹{monthly_income}
-            Risk Level: {risk_level}
-            Goal: {investment_goal}
-
-            Question:
-            {question}
-
-            Provide structured financial advice with:
-            - Investment allocation %
-            - SIP suggestions
-            - Safe options
-            - Growth options
-            - Emergency fund advice
+            Goal: {goal}
+            Target Amount: {target_amount}
+            Years: {years}
+            Income: {income}
+            Risk: {risk}
+            Create a step-by-step financial action plan.
             """
+            plan = safe_ai_call(prompt)
+            st.write(plan)
 
-            try:
-                response = client.models.generate_content(
-                    model="gemini-flash-lite-latest",
-                    contents=prompt
-                )
+# ---------------------------------
+# SECTION 3 — AI CHAT ASSISTANT
+# ---------------------------------
+elif section == "AI Chat Assistant":
 
-                st.success("✅ AI Recommendation Generated")
+    st.markdown('<div class="section-header">Financial Assistant Chat</div>', unsafe_allow_html=True)
 
-                col1, col2 = st.columns([2, 1])
+    profile_data = {
+        "income": income,
+        "expenses": expenses,
+        "savings": savings,
+        "debt": debt,
+        "risk": risk,
+        "goal": goal
+    }
 
-                # Left Column - AI Advice
-                with col1:
-                    st.subheader("📊 Financial Recommendation")
-                    st.write(response.text)
+    user_input = st.text_input("Ask your financial question")
 
-                # Right Column - Sample Allocation Chart
-                with col2:
-                    st.subheader("📈 Suggested Allocation")
+    if st.button("Send Message") and user_input:
 
-                    # Example Allocation (You can later parse real AI output)
-                    allocation = [40, 30, 20, 10]
-                    labels = ["SIP", "Stocks", "FD", "Emergency Fund"]
+        st.session_state.chat_history.append(("User", user_input))
 
-                    fig, ax = plt.subplots()
-                    ax.pie(allocation, labels=labels, autopct='%1.1f%%')
-                    st.pyplot(fig)
+        prompt = build_financial_chat_prompt(
+            user_input,
+            profile_data,
+            st.session_state.chat_history
+        )
 
-            except Exception as e:
-                st.error(f"Error: {e}")
+        with st.spinner("FinWise AI is analyzing your financial situation..."):
+            response = safe_ai_call(prompt)
+
+        st.session_state.chat_history.append(("AI", response))
+
+    # Display chat history
+    for role, message in st.session_state.chat_history:
+        if role == "User":
+            st.chat_message("user").write(message)
+        else:
+            st.chat_message("assistant").write(message)
